@@ -28,15 +28,11 @@ import {
   Info,
   ShoppingCart,
   SkipForward,
-  Check,
   X,
-  Keyboard,
   ArrowUp,
   ArrowDown,
   ArrowLeft,
-  ChevronRight,
   Plus,
-  Zap,
   Loader2
 } from 'lucide-react';
 import * as THREE from 'three';
@@ -115,18 +111,28 @@ const MISSIONS = [
 ];
 
 // --- Audio ---
-const SOUNDS = {
-  bgm: new Howl({ src: ['https://assets.mixkit.co/music/preview/mixkit-shopping-spree-611.mp3'], loop: true, volume: 0.2, html5: true }),
-  correct: new Howl({ src: ['https://assets.mixkit.co/sfx/preview/mixkit-achievement-bell-600.mp3'], volume: 0.5 }),
-  wrong: new Howl({ src: ['https://assets.mixkit.co/sfx/preview/mixkit-untrustworthy-slap-stick-2415.mp3'], volume: 0.3 }),
-  pop: new Howl({ src: ['https://assets.mixkit.co/sfx/preview/mixkit-positive-interface-click-1112.mp3'], volume: 0.4 }),
-  click: new Howl({ src: ['https://assets.mixkit.co/sfx/preview/mixkit-modern-click-box-check-1120.mp3'], volume: 0.4 }),
+type SoundKey = 'bgm' | 'correct' | 'wrong' | 'pop' | 'click';
+const SOUND_SRCS: Record<SoundKey, { src: string[]; loop?: boolean; volume: number; html5?: boolean }> = {
+  bgm:     { src: ['https://assets.mixkit.co/music/preview/mixkit-shopping-spree-611.mp3'], loop: true, volume: 0.2, html5: true },
+  correct: { src: ['https://assets.mixkit.co/sfx/preview/mixkit-achievement-bell-600.mp3'], volume: 0.5 },
+  wrong:   { src: ['https://assets.mixkit.co/sfx/preview/mixkit-untrustworthy-slap-stick-2415.mp3'], volume: 0.3 },
+  pop:     { src: ['https://assets.mixkit.co/sfx/preview/mixkit-positive-interface-click-1112.mp3'], volume: 0.4 },
+  click:   { src: ['https://assets.mixkit.co/sfx/preview/mixkit-modern-click-box-check-1120.mp3'], volume: 0.4 },
 };
+const SOUNDS: Partial<Record<SoundKey, Howl>> = {};
+let globalMuted = localStorage.getItem('muted') === 'true';
 
 const SoundControl = {
-  play: (key: keyof typeof SOUNDS) => { try { SOUNDS[key].play(); } catch(e){} },
-  stop: (key: keyof typeof SOUNDS) => { try { SOUNDS[key].stop(); } catch(e){} },
-  mute: (m: boolean) => { Object.values(SOUNDS).forEach(s => s.mute(m)); }
+  _get: (key: SoundKey): Howl => {
+    if (!SOUNDS[key]) {
+      SOUNDS[key] = new Howl(SOUND_SRCS[key]);
+      SOUNDS[key]!.mute(globalMuted);
+    }
+    return SOUNDS[key]!;
+  },
+  play: (key: SoundKey) => { try { SoundControl._get(key).play(); } catch(e){} },
+  stop: (key: SoundKey) => { try { SOUNDS[key]?.stop(); } catch(e){} },
+  mute: (m: boolean) => { globalMuted = m; Object.values(SOUNDS).forEach(s => s?.mute(m)); }
 };
 
 // --- 3D World ---
@@ -191,7 +197,7 @@ function RobloxAvatar({ movement, isPlaying }: { movement: { x: number, z: numbe
   );
 }
 
-function Supermarket({ onInspect, onSelection, activeCategory, state }: any) {
+function Supermarket({ onInspect, onSelection, activeCategory, state, hasOverlay }: any) {
   const aisles = useMemo(() => [
     { name: 'Drinks', z: -18 },
     { name: 'Chocolate', z: -6 },
@@ -227,6 +233,7 @@ function Supermarket({ onInspect, onSelection, activeCategory, state }: any) {
               onSelection={onSelection}
               isTarget={activeCategory === p.category && state === 'playing'}
               gameState={state}
+              hasOverlay={hasOverlay}
             />
           ))}
         </group>
@@ -238,20 +245,11 @@ function Supermarket({ onInspect, onSelection, activeCategory, state }: any) {
   );
 }
 
-function Product({ data, position, onInspect, onSelection, isTarget, gameState }: any) {
+function Product({ data, position, onInspect, onSelection, isTarget, gameState, hasOverlay }: any) {
   const [hovered, setHover] = useState(false);
-  const [isProximate, setIsProximate] = useState(false);
-  const avatarPosRef = useContext(AvatarContext);
   const worldPos = useMemo(() => new THREE.Vector3(...position), [position]);
   
-  useFrame(() => {
-    if (!avatarPosRef || gameState !== 'playing') return;
-    const distance = avatarPosRef.current.distanceTo(worldPos);
-    const close = distance < 5.5;
-    if (close !== isProximate) setIsProximate(close);
-  });
-
-  const showButtons = (hovered || isProximate) && gameState === 'playing';
+  const showButtons = gameState === 'playing' && !hasOverlay;
   useCursor(hovered && gameState === 'playing');
 
   return (
@@ -336,9 +334,26 @@ const CartView = ({ items, onRemove, onClose, isLoading }: { items: CartItem[], 
   );
 };
 
+const TutorialToast = ({ onDismiss }: { onDismiss: () => void }) => (
+  <motion.div
+    initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}
+    className="fixed bottom-48 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur text-white rounded-3xl px-6 py-5 shadow-2xl border border-white/10 w-[90vw] max-w-sm"
+  >
+    <p className="text-xs font-black uppercase text-green-400 tracking-widest mb-3">How to play</p>
+    <ul className="space-y-2 text-sm font-semibold mb-4">
+      <li className="flex items-center gap-2"><span className="text-lg">🕹️</span> Use arrow buttons to walk around</li>
+      <li className="flex items-center gap-2"><span className="text-lg">👆</span> Tap a product to view its details</li>
+      <li className="flex items-center gap-2"><span className="text-lg">✅</span> Press <span className="bg-green-600 px-2 py-0.5 rounded-lg text-xs">CHOOSE</span> on the shelf or <span className="bg-green-600 px-2 py-0.5 rounded-lg text-xs">SELECT</span> in the detail panel to add to cart</li>
+      <li className="flex items-center gap-2"><span className="text-lg">⭐</span> Pick ethical alternatives to earn more points!</li>
+    </ul>
+    <button onClick={onDismiss} className="w-full bg-green-600 text-white py-3 rounded-2xl font-black text-sm active:scale-95 transition-transform">GOT IT!</button>
+  </motion.div>
+);
+
 const HUD = ({ score, timer, mission, progress, isMuted, toggleMute, feedback, cartCount, onCartClick }: any) => {
   return (
     <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between z-20 font-sans">
+      {/* Top bar */}
       <div className="flex justify-between items-start pointer-events-auto">
         <div className="bg-white/95 backdrop-blur rounded-[2rem] p-3 shadow-xl border-2 border-green-500 flex gap-6 items-center">
           <div className="flex flex-col items-center">
@@ -364,15 +379,19 @@ const HUD = ({ score, timer, mission, progress, isMuted, toggleMute, feedback, c
           </button>
         </div>
       </div>
-      <div className="flex flex-col items-center mb-6">
-        <motion.div initial={{ y: 50 }} animate={{ y: 0 }} className="bg-white/95 backdrop-blur px-8 py-4 rounded-[2.5rem] shadow-xl border-b-8 border-green-600 border-x-2 border-t-2 border-slate-100 text-center">
+
+      {/* Bottom: mission card bottom-left */}
+      <div className="flex justify-start items-end pb-36 pointer-events-none">
+        <motion.div initial={{ y: 50 }} animate={{ y: 0 }} className="bg-white/95 backdrop-blur px-5 py-4 rounded-[2rem] shadow-xl border-b-8 border-green-600 border-x-2 border-t-2 border-slate-100 max-w-[220px]">
           <div className="text-[10px] font-black uppercase text-green-600 tracking-[0.2em] mb-1">Current Mission</div>
-          <h2 className="text-xl font-black text-slate-900 leading-tight mb-3">{mission}</h2>
-          <div className="w-48 h-2 bg-slate-100 rounded-full overflow-hidden border">
+          <h2 className="text-sm font-black text-slate-900 leading-tight mb-3">{mission}</h2>
+          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border">
             <motion.div className="h-full bg-green-500" animate={{ width: `${progress}%` }} />
           </div>
         </motion.div>
       </div>
+
+      {/* Feedback center */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <AnimatePresence>
           {feedback && (
@@ -408,6 +427,7 @@ export default function App() {
   const [boycottProduct, setBoycottProduct] = useState<ProductData | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [isCartLoading, setIsCartLoading] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
 
   const currentMission = MISSIONS[missionIdx];
 
@@ -428,6 +448,7 @@ export default function App() {
     SoundControl.mute(isMuted);
     if (gameState === 'playing' && !isMuted) SoundControl.play('bgm');
     else if (gameState !== 'playing') SoundControl.stop('bgm');
+    if (gameState === 'playing') setShowTutorial(true);
   }, [gameState, isMuted]);
 
   useEffect(() => {
@@ -491,7 +512,8 @@ export default function App() {
                 onInspect={(p: ProductData) => setSelectedProduct(p)} 
                 onSelection={onSelectionAction}
                 activeCategory={currentMission?.category} 
-                state={gameState} 
+                state={gameState}
+                hasOverlay={!!selectedProduct || !!boycottProduct || showCart}
               />
               {(gameState === 'playing' || gameState === 'menu') && (
                 <RobloxAvatar movement={movement} isPlaying={gameState === 'playing'} />
@@ -517,15 +539,15 @@ export default function App() {
           {gameState === 'intro' && (
             <motion.div 
               key="intro-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 z-40 flex flex-col items-end p-10 pointer-events-none"
+              className="absolute inset-0 z-40 flex flex-col items-end p-4 sm:p-10 pointer-events-none"
             >
               <button 
                 onClick={() => { SoundControl.play('click'); setGameState('menu'); }}
-                className="pointer-events-auto bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-8 py-4 rounded-full border-2 border-white/30 font-black flex items-center gap-3 active:scale-95 transition-all shadow-xl"
+                className="pointer-events-auto bg-white/10 hover:bg-white/20 backdrop-blur-md text-white px-5 py-3 sm:px-8 sm:py-4 rounded-full border-2 border-white/30 font-black flex items-center gap-2 sm:gap-3 text-sm sm:text-base active:scale-95 transition-all shadow-xl"
               >
-                SKIP INTRO <SkipForward className="w-6 h-6" />
+                SKIP INTRO <SkipForward className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
-              <div className="absolute bottom-10 left-10 text-white/40 text-[10vw] font-black italic tracking-tighter leading-none pointer-events-none uppercase">
+              <div className="absolute bottom-6 left-4 sm:bottom-10 sm:left-10 text-white text-[8vw] sm:text-[6vw] md:text-[5vw] font-black italic tracking-tighter leading-none pointer-events-none uppercase drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
                 Introducing<br/>The Challenge
               </div>
             </motion.div>
@@ -582,6 +604,13 @@ export default function App() {
           )}
         </AnimatePresence>
 
+        {/* Tutorial Toast */}
+        <AnimatePresence>
+          {showTutorial && (
+            <TutorialToast onDismiss={() => setShowTutorial(false)} />
+          )}
+        </AnimatePresence>
+
         {/* Cart View with Loading State */}
         <AnimatePresence>
           {showCart && (
@@ -608,6 +637,20 @@ export default function App() {
           )}
         </AnimatePresence>
 
+        {/* Arrow Controls */}
+        {gameState === 'playing' && (
+          <div className="absolute bottom-8 right-8 z-30 flex flex-col gap-2 pointer-events-auto">
+            <div className="flex justify-center">
+              <button onTouchStart={() => setMovement({x:0, z:-1})} onTouchEnd={() => setMovement({x:0,z:0})} onMouseDown={() => setMovement({x:0, z:-1})} onMouseUp={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowUp className="w-8 h-8 text-slate-900" /></button>
+            </div>
+            <div className="flex gap-2">
+              <button onTouchStart={() => setMovement({x:-1, z:0})} onTouchEnd={() => setMovement({x:0,z:0})} onMouseDown={() => setMovement({x:-1, z:0})} onMouseUp={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowLeft className="w-8 h-8 text-slate-900" /></button>
+              <button onTouchStart={() => setMovement({x:0, z:1})} onTouchEnd={() => setMovement({x:0,z:0})} onMouseDown={() => setMovement({x:0, z:1})} onMouseUp={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowDown className="w-8 h-8 text-slate-900" /></button>
+              <button onTouchStart={() => setMovement({x:1, z:0})} onTouchEnd={() => setMovement({x:0,z:0})} onMouseDown={() => setMovement({x:1, z:0})} onMouseUp={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowRight className="w-8 h-8 text-slate-900" /></button>
+            </div>
+          </div>
+        )}
+
         {/* Boycott Modal */}
         <AnimatePresence>
           {boycottProduct && (
@@ -628,63 +671,14 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* Controls */}
-        {gameState === 'playing' && (
-          <div className="absolute bottom-8 left-8 right-8 z-30 pointer-events-none flex justify-between items-end">
-             <div className="pointer-events-auto">
-                <Joystick onChange={setMovement} />
-             </div>
-             <div className="flex flex-col gap-2 pointer-events-auto">
-                <div className="flex justify-center">
-                   <button onTouchStart={() => setMovement({x:0, z:-1})} onTouchEnd={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowUp className="w-8 h-8 text-slate-900" /></button>
-                </div>
-                <div className="flex gap-2">
-                   <button onTouchStart={() => setMovement({x:-1, z:0})} onTouchEnd={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowLeft className="w-8 h-8 text-slate-900" /></button>
-                   <button onTouchStart={() => setMovement({x:0, z:1})} onTouchEnd={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowDown className="w-8 h-8 text-slate-900" /></button>
-                   <button onTouchStart={() => setMovement({x:1, z:0})} onTouchEnd={() => setMovement({x:0,z:0})} className="bg-white/90 p-5 rounded-2xl shadow-xl active:scale-90 transition-transform"><ArrowRight className="w-8 h-8 text-slate-900" /></button>
-                </div>
-             </div>
-          </div>
-        )}
+
+      {/* Watermark */}
+      <div className="fixed bottom-2 left-1/2 -translate-x-1/2 z-[999] pointer-events-none">
+        <p className="text-white text-[11px] font-black tracking-widest uppercase whitespace-nowrap drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">⚡ Powered by Abunajma with Kids</p>
+      </div>
+
       </div>
     </AvatarContext.Provider>
-  );
-}
-
-function Joystick({ onChange }: { onChange: (v: { x: number, z: number }) => void }) {
-  const [active, setActive] = useState(false);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const ref = useRef<HTMLDivElement>(null);
-
-  const handle = (x: number, y: number) => {
-    if (!active || !ref.current) return;
-    const r = ref.current.getBoundingClientRect();
-    const cx = r.left + r.width / 2;
-    const cy = r.top + r.height / 2;
-    const dx = x - cx;
-    const dy = y - cy;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    const lim = r.width / 2;
-    const amt = Math.min(dist, lim);
-    const ang = Math.atan2(dy, dx);
-    const lx = Math.cos(ang) * amt;
-    const ly = Math.sin(ang) * amt;
-    setPos({ x: lx, y: ly });
-    onChange({ x: lx / lim, z: ly / lim });
-  };
-
-  return (
-    <div ref={ref} className="w-40 h-40 bg-white/10 backdrop-blur-xl rounded-full border-4 border-white/30 flex items-center justify-center touch-none shadow-2xl"
-      onMouseDown={() => setActive(true)} 
-      onTouchStart={() => setActive(true)} 
-      onMouseMove={(e) => handle(e.clientX, e.clientY)}
-      onMouseUp={() => { setActive(false); setPos({x:0,y:0}); onChange({x:0,z:0}); }}
-      onMouseLeave={() => { setActive(false); setPos({x:0,y:0}); onChange({x:0,z:0}); }}
-      onTouchMove={(e) => handle(e.touches[0].clientX, e.touches[0].clientY)}
-      onTouchEnd={() => { setActive(false); setPos({x:0,y:0}); onChange({x:0,z:0}); }}
-    >
-      <motion.div animate={{ x: pos.x, y: pos.y }} className="w-16 h-16 bg-white rounded-full shadow-2xl border-4 border-slate-50" />
-    </div>
   );
 }
 
